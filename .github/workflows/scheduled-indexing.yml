@@ -16,23 +16,33 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
+
+      - name: Create package.json if missing
+        run: |
+          if [ ! -f package.json ]; then
+            echo '{
+              "name": "blogger-auto-indexer",
+              "version": "1.0.0",
+              "description": "Auto Google Indexing for Blogger Posts",
+              "main": "index.js",
+              "scripts": {
+                "start": "node index.js"
+              },
+              "dependencies": {
+                "googleapis": "^126.0.1",
+                "node-cron": "^3.0.2",
+                "axios": "^1.5.0",
+                "rss-parser": "^3.13.0"
+              }
+            }' > package.json
+          fi
 
       - name: Install dependencies
-        run: |
-          npm install
-          # Create package-lock.json if not exists
-          if [ ! -f package-lock.json ]; then
-            npm init -y
-          fi
+        run: npm install
 
       - name: Run Indexing
         env:
-          # Indexing API ke liye (Service Account)
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
-          
-          # Blog details
           BLOG_URL: ${{ secrets.BLOG_URL }}
-          RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }} # Optional
         run: node index.js
