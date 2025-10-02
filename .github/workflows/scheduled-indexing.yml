@@ -19,7 +19,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          # Create package-lock.json if not exists
+          if [ ! -f package-lock.json ]; then
+            npm init -y
+          fi
 
       - name: Run Indexing
         env:
