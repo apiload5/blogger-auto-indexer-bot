@@ -1,0 +1,41 @@
+name: Update package-lock.json
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  update-lock:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Generate / update lock
+        run: |
+          npm ci
+          npm install --package-lock-only
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update package-lock.json"
+            git push
+          else
+            echo "No changes in lock file"
+          fi
+          
