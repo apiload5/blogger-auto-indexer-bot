@@ -1,0 +1,29 @@
+name: Scheduled Google Indexing
+on:
+  schedule:
+    - cron: '0 */3 * * *'  # Har 3 ghante
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  index-posts:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Indexing Bot
+        env:
+          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+          BLOG_URL: ${{ secrets.BLOG_URL }}
+        run: node index.js
