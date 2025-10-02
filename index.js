@@ -3,16 +3,16 @@ const axios = require('axios');
 const cron = require('node-cron');
 const Parser = require('rss-parser');
 
-// Environment variables - GitHub Secrets se aayenge
+// Environment variables - From GitHub Secrets
 const {
     GOOGLE_SERVICE_ACCOUNT_EMAIL,
     GOOGLE_PRIVATE_KEY,
-    BLOG_URL, // Aapke blog ka URL
-    RSS_FEED_URL, // Aapke blog ka RSS feed URL
-    CHECK_INTERVAL = '0 */3 * * *' // Har 3 ghante
+    BLOG_URL, // REQUIRED - Sirf yeh chahiye
+    RSS_FEED_URL, // OPTIONAL - Nah bhi ho to chalega
+    CHECK_INTERVAL = '0 */3 * * *'
 } = process.env;
 
-// RSS Parser initialize karein
+// RSS Parser initialize
 const parser = new Parser();
 
 // Google Indexing API setup
@@ -30,32 +30,38 @@ const indexingAuth = new google.auth.JWT(
 // Track already indexed URLs
 let indexedUrls = new Set();
 
-// Function to get latest posts from RSS Feed
+// Function to get latest posts - Automatic RSS URL Generation
 async function getLatestPosts() {
     try {
-        console.log('📝 Checking for new posts via RSS...');
+        console.log('📝 Checking for new posts...');
         
         let feed;
+        let rssUrl;
         
-        // Agar RSS_FEED_URL hai to use karein, nahi to BLOG_URL se RSS feed banayein
+        // Agar RSS_FEED_URL provide kiya hai to use karo
         if (RSS_FEED_URL) {
-            feed = await parser.parseURL(RSS_FEED_URL);
+            rssUrl = RSS_FEED_URL;
+            console.log(`📡 Using custom RSS feed: ${rssUrl}`);
         } else {
-            // Default RSS feed URL banayein
-            const defaultRssUrl = `${BLOG_URL.replace(/\/$/, '')}/feeds/posts/default`;
-            feed = await parser.parseURL(defaultRssUrl);
+            // Automatically generate RSS URL from BLOG_URL
+            rssUrl = `${BLOG_URL.replace(/\/$/, '')}/feeds/posts/default?alt=rss`;
+            console.log(`📡 Using auto-generated RSS feed: ${rssUrl}`);
         }
-
+        
+        feed = await parser.parseURL(rssUrl);
         const posts = feed.items || [];
+        
         console.log(`✅ Found ${posts.length} posts via RSS`);
         return posts;
+        
     } catch (error) {
-        console.error('❌ Error getting posts from RSS:', error.message);
-        return [];
+        console.error('❌ RSS Error:', error.message);
+        console.log('🔄 Falling back to HTML scraping...');
+        return await getPostsFromHTML();
     }
 }
 
-// Alternative: HTML scraping se posts get karna
+// HTML scraping fallback
 async function getPostsFromHTML() {
     try {
         console.log('🌐 Checking blog via HTML...');
@@ -69,11 +75,12 @@ async function getPostsFromHTML() {
 
         const html = response.data;
         
-        // Post URLs extract karein (common patterns)
+        // Common Blogger post URL patterns
         const postUrlPatterns = [
             /href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g,
             /href="([^"]*\/p\/[^"]*\.html)"/g,
-            /<a[^>]*href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*)"[^>]*>/g
+            /<a[^>]*href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*)"[^>]*>/g,
+            /href="(https:\/\/[^"]*\.blogspot\.com\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g
         ];
 
         const posts = [];
@@ -84,24 +91,30 @@ async function getPostsFromHTML() {
             while ((match = pattern.exec(html)) !== null) {
                 let url = match[1];
                 
-                // Relative URL ko absolute mein convert karein
+                // Relative URL ko absolute mein convert karo
                 if (url.startsWith('/')) {
                     const blogBase = new URL(BLOG_URL).origin;
                     url = blogBase + url;
                 }
                 
-                // Duplicate check karein
-                if (!seenUrls.has(url) && url.includes('http')) {
+                // Duplicate check karo aur valid URL filter karo
+                if (!seenUrls.has(url) && 
+                    url.includes('http') && 
+                    url.includes('.html') &&
+                    !url.includes('search?q=')) {
                     seenUrls.add(url);
-                    posts.push({ url: url });
+                    posts.push({ 
+                        url: url,
+                        title: `Post from ${new URL(url).pathname}`
+                    });
                 }
             }
         }
 
         console.log(`✅ Found ${posts.length} posts via HTML`);
-        return posts.slice(0, 20); // Last 20 posts
+        return posts.slice(0, 15); // Last 15 posts
     } catch (error) {
-        console.error('❌ Error getting posts from HTML:', error.message);
+        console.error('❌ HTML scraping error:', error.message);
         return [];
     }
 }
@@ -150,15 +163,10 @@ async function checkAndIndexNewPosts() {
     try {
         console.log('\n🚀 Starting Google Indexing Check...');
         console.log(`⏰ Time: ${new Date().toISOString()}`);
+        console.log(`🔗 Blog URL: ${BLOG_URL}`);
         
-        // Pehle RSS feed try karein
-        let latestPosts = await getLatestPosts();
-        
-        // Agar RSS fail ho to HTML scraping try karein
-        if (latestPosts.length === 0) {
-            console.log('🔄 Trying HTML scraping...');
-            latestPosts = await getPostsFromHTML();
-        }
+        // Latest posts get karo
+        const latestPosts = await getLatestPosts();
         
         if (latestPosts.length === 0) {
             console.log('❌ No posts found to index');
@@ -176,8 +184,8 @@ async function checkAndIndexNewPosts() {
             const result = await indexUrl(postUrl);
             results.push(result);
             
-            // 1 second wait between requests (rate limiting)
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // 2 second wait between requests (rate limiting)
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
         // Results summary
