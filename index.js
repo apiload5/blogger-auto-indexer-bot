@@ -13,7 +13,7 @@ const {
     GOOGLE_PRIVATE_KEY,
     BLOG_URL, // REQUIRED - Sirf yeh chahiye
     RSS_FEED_URL, // OPTIONAL - Nah bhi ho to chalega
-    CHECK_INTERVAL = '0 */3 * * *' // Default to 3 hours
+    CHECK_INTERVAL = '0 */1 * * *' // Default to 3 hours
 } = process.env;
 
 // RSS Parser initialize
