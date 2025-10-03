@@ -26,5 +26,5 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
           BLOG_URL: ${{ secrets.BLOG_URL }}
-        # Index.js mein TLS fix shamil hone ke baad, yeh line simple rahegi
+        # Index.js mein TLS fix shamil hone ke baad, yeh line simple rahegi 
         run: node index.js
