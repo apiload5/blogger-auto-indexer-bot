@@ -3,13 +3,17 @@ const axios = require('axios');
 const cron = require('node-cron');
 const Parser = require('rss-parser');
 
+// 🔑🔑 FIX: OpenSSL 3.0 error:1E08010C ko hal karne ke liye 🔑🔑
+// Ye line Node.js ko legacy ciphers (SECLEVEL=1) istemal karne ki ijazat deti hai.
+require('https').globalAgent.options.ciphers = 'DEFAULT@SECLEVEL=1'; 
+
 // Environment variables - From GitHub Secrets
 const {
     GOOGLE_SERVICE_ACCOUNT_EMAIL,
     GOOGLE_PRIVATE_KEY,
     BLOG_URL, // REQUIRED - Sirf yeh chahiye
     RSS_FEED_URL, // OPTIONAL - Nah bhi ho to chalega
-    CHECK_INTERVAL = '0 */1 * * *'
+    CHECK_INTERVAL = '0 */3 * * *' // 3 ghante kar dia
 } = process.env;
 
 // RSS Parser initialize
@@ -48,6 +52,7 @@ async function getLatestPosts() {
             console.log(`📡 Using auto-generated RSS feed: ${rssUrl}`);
         }
         
+        // Yahan 'parser.parseURL' mein Axios/HTTPS request hota hai
         feed = await parser.parseURL(rssUrl);
         const posts = feed.items || [];
         
@@ -66,6 +71,7 @@ async function getPostsFromHTML() {
     try {
         console.log('🌐 Checking blog via HTML...');
         
+        // Yahan bhi Axios istemal ho raha hai
         const response = await axios.get(BLOG_URL, {
             timeout: 10000,
             headers: {
@@ -149,7 +155,8 @@ async function indexUrl(url) {
             response: response.data 
         };
     } catch (error) {
-        console.error(`❌ Error indexing URL: ${url}`, error.response?.data || error.message);
+        // Google Indexing API error yahan catch hoga
+        console.error(`❌ Error indexing URL: ${url}`, error.response?.data?.error?.message || error.message);
         return { 
             success: false, 
             url: url, 
@@ -214,7 +221,7 @@ cron.schedule(CHECK_INTERVAL, async () => {
 
 // Startup message
 console.log('🚀 Blogger Auto Indexer Started!');
-console.log('⏰ Will check every 3 hours for new posts');
+console.log(`⏰ Will check every ${parseInt(CHECK_INTERVAL.split(' ')[1].replace('*/', ''))} hours for new posts`);
 
 // First run on startup
 setTimeout(() => {
