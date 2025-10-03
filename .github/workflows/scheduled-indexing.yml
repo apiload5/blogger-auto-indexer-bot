@@ -1,13 +1,26 @@
-name: Scheduled Google Indexing
+name: Blogger Indexer & Lockfile Management
+
 on:
   schedule:
-    - cron: '0 */1 * * *'  # Har 1 ghante
-  workflow_dispatch:  # Manual trigger
+    # 3 ghante baad Indexing Bot chalega
+    - cron: '0 */1 * * *' 
+  workflow_dispatch: # Dasti taur par chalane ke liye
+  push:
+    branches:
+      - main # Ya apni branch ka naam
+    paths:
+      # Jab package.json mein tabdeeli ho to lockfile manage ho
+      - 'package.json' 
 
 jobs:
-  index-posts:
+  # 1. Lockfile aur Dependencies Manage karein
+  setup-and-install:
     runs-on: ubuntu-latest
     
+    # Ye permission file ko commit aur push karne ke liye zaroori hai
+    permissions:
+      contents: write 
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -18,13 +31,45 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install dependencies (Creates/Updates package-lock.json)
+        # npm install lockfile ke baghair bhi chalega aur ise bana dega
         run: npm install
 
+      - name: Commit package-lock.json (If changed or created)
+        # Nayi ya updated lockfile ko repository mein commit karega
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(deps): Auto-update package-lock.json"
+          files: package-lock.json
+          # sirf push event par commit karein
+          commit_options: '--no-verify --allow-empty'
+
+
+  # 2. Indexing Bot ko chalayein (Dependencies install hone ke baad)
+  index-posts:
+    runs-on: ubuntu-latest
+    # Ye job sirf tab chalegi jab 'setup-and-install' job kamyab ho
+    needs: setup-and-install
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        # Lockfile update hone ke baad naye modules tak rasai ke liye dobara checkout zaroori hai
+
+      - name: Setup Node.js (For Indexer Run)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install Dependencies (Again, using lockfile)
+        # Dependencies dobara install karein ya confirm karein
+        run: npm ci 
+        
       - name: Run Indexing Bot
         env:
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
           BLOG_URL: ${{ secrets.BLOG_URL }}
-        # Index.js mein TLS fix shamil hone ke baad, yeh line simple rahegi
+        # Index.js mein OpenSSL fix hona chahiye
         run: node index.js
