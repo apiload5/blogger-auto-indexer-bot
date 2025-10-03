@@ -1,16 +1,20 @@
 name: Update package-lock.json
 
 on:
-  # یہ ورک فلو تب چلے گا جب package.json میں تبدیلی ہوگی اور اسے push کیا جائے گا
   push:
     branches:
-      - main  # اپنی main branch کا نام یہاں لکھیں (جیسے master یا main)
+      - main
     paths:
       - 'package.json'
 
 jobs:
   update-lock:
     runs-on: ubuntu-latest
+    
+    # 🔑 FIX: Permissions yahan shamil karen
+    permissions:
+      contents: write # Ye permission file ko commit aur push karne ke liye zaroori hai
+      
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,13 +26,10 @@ jobs:
           cache: 'npm'
           
       - name: Install dependencies (This generates package-lock.json)
-        # npm install کمانڈ چلانے سے package-lock.json فائل بن جائے گی
         run: npm install
         
-      - name: Commit updated package-lock.json
-        # یہ step نئی بنی ہوئی package-lock.json فائل کو commit کرے گا
+      - name: Commit package-lock.json
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(deps): Auto-generate package-lock.json"
-          # صرف package-lock.json کو commit کریں گے
           files: package-lock.json
