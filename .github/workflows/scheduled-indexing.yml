@@ -1,7 +1,7 @@
 name: Scheduled Google Indexing
 on:
   schedule:
-    - cron: '0 */3 * * *'  # Har 3 ghante
+    - cron: '0 */1 * * *'  # Har 3 ghante
   workflow_dispatch:  # Manual trigger
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install  # YEH LINE CHANGE KARDI
 
       - name: Run Indexing Bot
         env:
