@@ -1,8 +1,8 @@
 name: Scheduled Google Indexing
 on:
   schedule:
-    - cron: '0 */1 * * *'  # Har 3 ghante (maine 0 */3 * * * kar dia hai, kyunki pehle comment mein 3 ghante likha tha)
-  workflow_dispatch:  # Manual trigger 
+    - cron: '0 */3 * * *'  # Har 3 ghante
+  workflow_dispatch:  # Manual trigger
 
 jobs:
   index-posts:
@@ -21,10 +21,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run Indexing Bot (with OpenSSL Legacy Provider)
+      - name: Run Indexing Bot
         env:
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
           BLOG_URL: ${{ secrets.BLOG_URL }}
-        # 🔑 Yahan maine NODE_OPTIONS environment variable shamil kar diya hai
-        run: NODE_OPTIONS=--openssl-legacy-provider node index.js
+        # Index.js mein TLS fix shamil hone ke baad, yeh line simple rahegi
+        run: node index.js
