@@ -13,7 +13,7 @@ const {
     GOOGLE_PRIVATE_KEY,
     BLOG_URL, // REQUIRED - Sirf yeh chahiye
     RSS_FEED_URL, // OPTIONAL - Nah bhi ho to chalega
-    CHECK_INTERVAL = '0 */1 * * *' // 3 ghante kar dia
+    CHECK_INTERVAL = '0 */3 * * *' // Default to 3 hours
 } = process.env;
 
 // RSS Parser initialize
@@ -60,6 +60,7 @@ async function getLatestPosts() {
         return posts;
         
     } catch (error) {
+        // ERROR LOGGING BAHUT AHEM HAI
         console.error('❌ RSS Error:', error.message);
         console.log('🔄 Falling back to HTML scraping...');
         return await getPostsFromHTML();
@@ -221,7 +222,10 @@ cron.schedule(CHECK_INTERVAL, async () => {
 
 // Startup message
 console.log('🚀 Blogger Auto Indexer Started!');
-console.log(`⏰ Will check every ${parseInt(CHECK_INTERVAL.split(' ')[1].replace('*/', ''))} hours for new posts`);
+// Ye CHECK_INTERVAL ki qeemat se check karega
+const intervalParts = CHECK_INTERVAL.split(' ');
+const hours = intervalParts.length > 1 && intervalParts[1].startsWith('*/') ? intervalParts[1].replace('*/', '') : '3';
+console.log(`⏰ Will check every ${hours} hours for new posts`);
 
 // First run on startup
 setTimeout(() => {
