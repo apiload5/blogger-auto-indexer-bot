@@ -2,17 +2,18 @@ name: Blogger Indexer & Lockfile Management
 
 on:
   schedule:
-    # Har 3 ghante mein chalega (Best practice)
+    # Indexing Bot har 3 ghante mein chalega
     - cron: '0 */1 * * *' 
-  workflow_dispatch: # Manual run
+  workflow_dispatch: # Manual run ke liye
   push:
     branches:
-      - main # Ya apni branch ka naam
+      - main # Apni branch ka naam
     paths:
-      - 'package.json' # package.json badalne par lockfile update ho
+      # package.json badalne par Lockfile update ho
+      - 'package.json' 
 
 jobs:
-  # 1. Lockfile aur Dependencies Manage karein
+  # 1. Setup, Lockfile Management, aur Dependencies Install
   setup-and-install:
     runs-on: ubuntu-latest
     
@@ -25,17 +26,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node.js (No Cache)
+        # Cache ko hata dia taake integrity issue na aaye
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # Cache ko hata dia taake integrity issue na aaye
 
-      - name: Install dependencies (Creates/Updates package-lock.json & Cleans Cache)
-        # 🔑 FIX: --no-cache istemal karen aur --network-concurrency 1
-        # Ye Integrity issue aur network corruption ko hal karega
-        run: npm install --no-cache --network-concurrency 1
+      - name: Install dependencies (Fix Integrity Error)
+        # 🔑 FIX: --force option istemal karen taake integrity error ko ignore kia ja sake
+        run: npm install --no-cache --network-concurrency 1 --force
 
-      - name: Commit package-lock.json (If changed or created)
+      - name: Commit package-lock.json (If created/changed)
         # Nayi ya updated lockfile ko repository mein commit karega
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
@@ -43,16 +43,15 @@ jobs:
           files: package-lock.json
 
 
-  # 2. Indexing Bot ko chalayein
+  # 2. Indexing Bot ko chalayein (Dependencies install hone ke baad)
   index-posts:
     runs-on: ubuntu-latest
-    # Ye job sirf scheduled run ya manual run par chalni chahiye.
-    # Agar sirf indexing bot chalana hai to 'needs: setup-and-install' ko remove karna parhega.
-    # Lekin behtar hai ke needs ko rehne den taake dependencies tayyar hon.
+    # Ye job sirf tab chalegi jab 'setup-and-install' job kamyab ho
     needs: setup-and-install
     
     steps:
       - name: Checkout code (After lockfile update)
+        # Zaroori hai taake naya 'package-lock.json' is job mein maujood ho
         uses: actions/checkout@v4
 
       - name: Setup Node.js (For Indexer Run)
@@ -61,7 +60,7 @@ jobs:
           node-version: '20'
       
       - name: Install Dependencies (Fast install using the new lockfile)
-        # Ab lockfile maujood hai to npm ci tez chalega
+        # Lockfile ban chuka hai to npm ci istemal karen
         run: npm ci 
         
       - name: Run Indexing Bot
