@@ -1,70 +1,38 @@
-name: Blogger Indexer & Lockfile Management (Yarn Fix)
+name: Google Indexing Automation
 
 on:
+  # Job ko har 24 ghante (midnight) mein chalane ka schedule
   schedule:
-    - cron: '0 */1 * * *' 
-  workflow_dispatch: 
-  push:
-    branches:
-      - main 
-    paths:
-      - 'package.json' 
+    - cron: '0 0 * * *' 
+  # Manual run ke liye button
+  workflow_dispatch:
 
 jobs:
-  # 1. Setup, Lockfile Management (Yarn ka istemal)
-  setup-and-install:
+  run-indexing:
     runs-on: ubuntu-latest
-    
-    permissions:
-      contents: write 
 
     steps:
-      - name: Checkout code
+      - name: Checkout Repository
         uses: actions/checkout@v4
-
-      # 🔑 CHANGE: Node.js ke sath Yarn ko bhi set up karen
-      - name: Setup Node.js and Yarn
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'yarn' # Ab yarn cache istemal karen
-
-      - name: Install dependencies (Creates/Updates yarn.lock)
-        # 🔑 FIX: Yarn install istemal karen. Ye integrity issues ko handle karega.
-        # Agar package-lock.json maujood ho to use delete kar den
-        run: yarn install --immutable false
-
-      - name: Commit lockfile (yarn.lock)
-        # Yarn.lock ko commit karega
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore(deps): Auto-update yarn.lock (Fixing Integrity)"
-          files: yarn.lock
-
-
-  # 2. Indexing Bot ko chalayein
-  index-posts:
-    runs-on: ubuntu-latest
-    needs: setup-and-install
-    
-    steps:
-      - name: Checkout code (After lockfile update)
-        uses: actions/checkout@v4
-
-      # 🔑 CHANGE: Node.js ke sath Yarn ko set up karen
-      - name: Setup Node.js and Yarn
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'yarn'
       
-      - name: Install Dependencies (Fast install using yarn.lock)
-        # Dependencies install karein (yarn install ya yarn)
-        run: yarn install --immutable # Tez aur mutabqat wala install
-        
-      - name: Run Indexing Bot
+      # Node.js ko setup karein
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Dependencies (packages) install karein
+      - name: Install Dependencies
+        run: npm install
+
+      # Indexing Script ko chalaayein
+      - name: Run Indexing Script
+        run: node index.js
         env:
+          # GitHub Secrets se Environment Variables load karein
           GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
           BLOG_URL: ${{ secrets.BLOG_URL }}
-        run: node index.js
+          RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
+          # Abhi 24 ghante par set hai (Aap isse badal sakte hain)
+          CHECK_INTERVAL: '0 0 * * *'
