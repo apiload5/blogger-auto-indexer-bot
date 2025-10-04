@@ -2,7 +2,7 @@
 
 A powerful Node.js application that automatically detects new posts on your Blogger blog and submits them to Google Indexing API for instant indexing in search results. No manual work required!
 
-![GitHub](https://img.shields.io/badge/Node.js-18+-green)
+![GitHub](https://img.shields.io/badge/Node.js-20+-green)
 ![GitHub](https://img.shields.io/badge/Automated-Indexing-blue)
 ![GitHub](https://img.shields.io/badge/Free-Open_Source-success)
 
