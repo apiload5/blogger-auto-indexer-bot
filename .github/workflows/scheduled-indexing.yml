@@ -3,7 +3,7 @@ name: Blogger Indexer & Lockfile Management
 on:
   schedule:
     # Har 3 ghante mein chalega (Best practice)
-    - cron: '0 */3 * * *' 
+    - cron: '0 */1 * * *' 
   workflow_dispatch: # Manual run
   push:
     branches:
