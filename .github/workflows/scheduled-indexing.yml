@@ -30,6 +30,12 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+        # ... Setup Node.js step ke baad
+      - name: Clear npm Cache
+        run: npm cache clean --force
+      
+      - name: Install dependencies (Creates/Updates package-lock.json)
+        run: npm install
 
       - name: Install dependencies (Creates/Updates package-lock.json)
         # npm install lockfile ke baghair bhi chalega aur ise bana dega
