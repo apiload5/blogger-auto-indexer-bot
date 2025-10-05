@@ -1,8 +1,7 @@
 const { google } = require('googleapis');
 const axios = require('axios');
-const cron = require('node-cron');
+const cron = require('node-cron'); // Cron Library
 const Parser = require('rss-parser');
-// const fs = require('fs'); // Tracking hata diya gaya
 const { URL } = require('url'); 
 
 // 🔑🔑 FIX: OpenSSL 3.0 error:1E08010C ko hal karne ke liye 🔑🔑
@@ -14,7 +13,6 @@ const {
     GOOGLE_PRIVATE_KEY,
     BLOG_URL, 
     RSS_FEED_URL, 
-    CHECK_INTERVAL = '0 */3 * * *' // Har 3 ghante mein check karega (CRON)
 } = process.env;
 
 // CONSTANTS
@@ -25,8 +23,8 @@ const DELAY_BETWEEN_REQUESTS = 2000; // 2 seconds delay (Rate Limiting)
 const parser = new Parser();
 const indexing = google.indexing('v3');
 
-// JWT Client for Indexing API
-const indexingAuth = new new google.auth.JWT(
+// ✅ FIX: 'new new' ko 'new' mein theek kiya gaya hai
+const indexingAuth = new google.auth.JWT(
     GOOGLE_SERVICE_ACCOUNT_EMAIL,
     null,
     GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
@@ -35,10 +33,9 @@ const indexingAuth = new new google.auth.JWT(
 );
 
 // =================================================================
-// ## Post Fetching Logic (RSS aur HTML Scraping - Aapka Purana Logic)
+// ## Post Fetching Logic (Same Functions)
 // =================================================================
 
-// HTML scraping fallback (Assuming your original logic is pasted here)
 async function getPostsFromHTML() {
     try {
         console.log('🌐 Checking blog via HTML...');
@@ -47,7 +44,6 @@ async function getPostsFromHTML() {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
         });
         const html = response.data;
-        // ... (Scraping logic) ...
         const postUrlPatterns = [
             /href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g,
             /href="([^"]*\/p\/[^"]*\.html)"/g,
@@ -95,10 +91,9 @@ async function getLatestPosts() {
 
 
 // =================================================================
-// ## Indexing Logic (Ab yeh dobara submit karega, Quota-safe tareeqe se)
+// ## Indexing Logic
 // =================================================================
 
-// Function to index a URL using Google Indexing API
 async function indexUrl(url) {
     try {
         console.log(`🔍 Submitting URL: ${url}`);
@@ -108,13 +103,11 @@ async function indexUrl(url) {
             requestBody: { url: url, type: 'URL_UPDATED' }
         });
 
-        // 🟢 Successful API Submission 🟢
         console.log(`✅ Successfully submitted: ${url}`);
         return { success: true, url: url, response: response.data };
     } catch (error) {
         const errorMessage = error.response?.data?.error?.message || error.message;
         
-        // Quota exceeded error aane par job rok dein
         if (errorMessage.includes('Quota exceeded')) {
              console.error('🚨🚨 QUOTA EXCEEDED. Stopping job. Remaining URLs will be checked next time.');
              throw new Error('Quota Exceeded'); 
@@ -149,17 +142,15 @@ async function checkAndIndexNewPosts() {
                 const result = await indexUrl(postUrl);
                 results.push(result);
 
-                // Rate limiting delay
                 await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_REQUESTS));
             } catch (error) {
                 if (error.message.includes('Quota Exceeded')) {
                      results.push({ success: false, url: postUrl, error: 'Quota Exceeded' });
-                     break; // Stop loop immediately
+                     break; 
                 }
             }
         }
         
-        // Results summary
         const submitted = results.filter(r => r.success).length;
         const failed = results.filter(r => !r.success).length;
         const postsFound = latestPosts.length;
@@ -186,15 +177,27 @@ async function checkAndIndexNewPosts() {
 }
 
 // =================================================================
-// ## Startup and Scheduling (Automation)
+// ## Startup aur Mode Selection (Yahan tabdeeli karein)
 // =================================================================
 
-console.log('🚀 Blogger Auto Indexer Started!');
-const intervalParts = CHECK_INTERVAL.split(' ');
-const hours = intervalParts.length > 1 && intervalParts[1].startsWith('*/') ? intervalParts[1].replace('*/', '') : '3';
-console.log(`⏰ Scheduled to check every ${hours} hours.`);
+console.log('🚀 Indexer Application Starting...');
 
-// Cron job to run on schedule (Set-and-Forget)
+// ----------------------------------------------------------------------------------
+// 💡 KAISE CHALAAYEIN: 
+// Sirf ek (1) MODE (A ya B) ko uncomment (zinda) rakhein aur doosre ko comment (band) kar dein.
+// ----------------------------------------------------------------------------------
+
+
+// ➡️ MODE A: SIRF EK BAAR CHALKAR RUK JAYE (Testing / GitHub Actions / Mode Once)
+/*
+checkAndIndexNewPosts(); 
+*/
+
+// ➡️ MODE B: SCHEDULE CHALTA RAHE (24/7 Automation for Replit Always On)
+const CHECK_INTERVAL = '0 */3 * * *'; // Har 3 ghante mein run karega (Aap yahan badal sakte hain)
+
+console.log(`⏰ Scheduler Mode: Will check every 3 hours.`);
+
 cron.schedule(CHECK_INTERVAL, async () => {
     console.log(`\n\n==============================================`);
     console.log(`🕒 SCHEDULED RUN STARTED...`);
@@ -202,5 +205,5 @@ cron.schedule(CHECK_INTERVAL, async () => {
     await checkAndIndexNewPosts();
 });
 
-// Immediate run on startup
+// Immediate run on startup (Schedule Mode mein shuruat mein bhi chalta hai)
 checkAndIndexNewPosts();
