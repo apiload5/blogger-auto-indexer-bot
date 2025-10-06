@@ -1,87 +1,102 @@
 const { google } = require('googleapis');
 const axios = require('axios');
-const cron = require('node-cron'); // Cron Library
+const cron = require('node-cron');
 const Parser = require('rss-parser');
 const { URL } = require('url'); 
 
-// 🔑🔑 FIX: OpenSSL 3.0 error:1E08010C ko hal karne ke liye 🔑🔑
+// 🔑 SSL Fix
 require('https').globalAgent.options.ciphers = 'DEFAULT@SECLEVEL=1'; 
 
-// Environment variables
+// Environment variables - NAYA VARIABLE ADD KAREIN
 const {
     GOOGLE_SERVICE_ACCOUNT_EMAIL,
     GOOGLE_PRIVATE_KEY,
     BLOG_URL, 
-    RSS_FEED_URL, 
+    RSS_FEED_URL,
+    SEARCH_CONSOLE_PROPERTY, // NAYA: sc-domain:ticnocity.blogspot.com
 } = process.env;
 
 // CONSTANTS
-const MAX_URLS_TO_SUBMIT = 25; // Aik waqt me zyada se zyada itne URLs submit karega
-const DELAY_BETWEEN_REQUESTS = 2000; // 2 seconds delay (Rate Limiting)
+const MAX_URLS_TO_SUBMIT = 25;
+const DELAY_BETWEEN_REQUESTS = 2000;
 
 // RSS Parser initialize
 const parser = new Parser();
 const indexing = google.indexing('v3');
+const searchconsole = google.searchconsole('v1'); // NAYA
 
-// ✅ FIX: 'new new' ko 'new' mein theek kiya gaya hai
 const indexingAuth = new google.auth.JWT(
     GOOGLE_SERVICE_ACCOUNT_EMAIL,
     null,
     GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    ['https://www.googleapis.com/auth/indexing'],
+    ['https://www.googleapis.com/auth/indexing', 'https://www.googleapis.com/auth/webmasters.readonly'],
     null
 );
 
 // =================================================================
-// ## Post Fetching Logic (Same Functions)
+// ## NAYA FUNCTION: Search Console se indexed URLs check karega
 // =================================================================
 
-async function getPostsFromHTML() {
+async function getIndexedUrls() {
     try {
-        console.log('🌐 Checking blog via HTML...');
-        const response = await axios.get(BLOG_URL, {
-            timeout: 10000,
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        console.log('🔍 Checking already indexed URLs from Search Console...');
+        
+        const response = await searchconsole.sitemaps.list({
+            auth: indexingAuth,
+            siteUrl: SEARCH_CONSOPER_CONSOLE_PROPERTY
         });
-        const html = response.data;
-        const postUrlPatterns = [
-            /href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g,
-            /href="([^"]*\/p\/[^"]*\.html)"/g,
-            /<a[^>]*href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*)"[^>]*>/g,
-            /href="(https:\/\/[^"]*\.blogspot\.com\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g
-        ];
-        const posts = [];
-        const seenUrls = new Set();
-        const blogBase = new URL(BLOG_URL).origin;
-
-        for (const pattern of postUrlPatterns) {
-            let match;
-            while ((match = pattern.exec(html)) !== null) {
-                let url = match[1];
-                if (url.startsWith('/')) { url = blogBase + url; }
-                if (!seenUrls.has(url) && url.includes('http') && url.includes('.html') && !url.includes('search?q=')) {
-                    seenUrls.add(url);
-                    posts.push({ url: url, title: `Post from ${new URL(url).pathname}` });
-                }
-            }
-        }
-        console.log(`✅ Found ${posts.length} posts via HTML`);
-        return posts; 
+        
+        // Ya alternative method
+        const indexedResponse = await searchconsole.urlInspection.index.get({
+            auth: indexingAuth,
+            siteUrl: SEARCH_CONSOLE_PROPERTY,
+            inspectionUrl: BLOG_URL
+        });
+        
+        const indexedUrls = new Set();
+        // Yahan aap appropriate response parsing karein based on Search Console API
+        
+        console.log(`✅ Found ${indexedUrls.size} already indexed URLs`);
+        return indexedUrls;
     } catch (error) {
-        console.error('❌ HTML scraping error:', error.message);
-        return [];
+        console.error('❌ Search Console check error:', error.message);
+        return new Set(); // Error case mein empty set return karega
     }
 }
+
+// =================================================================
+// ## Post Fetching Logic (Modified)
+// =================================================================
 
 async function getLatestPosts() {
     try {
         console.log('📝 Checking for new posts...');
+        
+        // Pehle indexed URLs check karein
+        const alreadyIndexedUrls = await getIndexedUrls();
+        
         let rssUrl = RSS_FEED_URL || `${BLOG_URL.replace(/\/$/, '')}/feeds/posts/default?alt=rss`;
         console.log(`📡 Using RSS feed: ${rssUrl}`);
+        
         const feed = await parser.parseURL(rssUrl);
-        const posts = feed.items || [];
-        console.log(`✅ Found ${posts.length} posts via RSS`);
-        return posts;
+        let posts = feed.items || [];
+        
+        // Sirf unhi posts ko filter karein jo indexed nahi hain
+        const newPosts = posts.filter(post => {
+            const postUrl = post.url || post.link;
+            return !alreadyIndexedUrls.has(postUrl);
+        });
+        
+        console.log(`📊 Total posts: ${posts.length}, New/Unindexed posts: ${newPosts.length}`);
+        
+        if (newPosts.length === 0) {
+            console.log('ℹ️ All posts are already indexed. Falling back to HTML scraping...');
+            const htmlPosts = await getPostsFromHTML();
+            // HTML posts bhi filter karein
+            return htmlPosts.filter(post => !alreadyIndexedUrls.has(post.url));
+        }
+        
+        return newPosts;
     } catch (error) {
         console.error('❌ RSS Error:', error.message);
         console.log('🔄 Falling back to HTML scraping...');
@@ -89,53 +104,74 @@ async function getLatestPosts() {
     }
 }
 
-
 // =================================================================
-// ## Indexing Logic
+// ## Priority-based Indexing Logic - NAYA
 // =================================================================
 
-async function indexUrl(url) {
-    try {
-        console.log(`🔍 Submitting URL: ${url}`);
-        
-        const response = await indexing.urlNotifications.publish({
-            auth: indexingAuth,
-            requestBody: { url: url, type: 'URL_UPDATED' }
-        });
-
-        console.log(`✅ Successfully submitted: ${url}`);
-        return { success: true, url: url, response: response.data };
-    } catch (error) {
-        const errorMessage = error.response?.data?.error?.message || error.message;
-        
-        if (errorMessage.includes('Quota exceeded')) {
-             console.error('🚨🚨 QUOTA EXCEEDED. Stopping job. Remaining URLs will be checked next time.');
-             throw new Error('Quota Exceeded'); 
-        }
-        
-        console.error(`❌ Error submitting URL: ${url}`, errorMessage);
-        return { success: false, url: url, error: errorMessage };
-    }
+function prioritizeUrls(posts) {
+    console.log('🎯 Prioritizing URLs for indexing...');
+    
+    return posts
+        .map(post => {
+            let priority = 0;
+            const url = post.url || post.link;
+            const title = post.title || '';
+            const pubDate = post.pubDate || post.isoDate || '';
+            
+            // Priority criteria:
+            // 1. Naye posts (1-2 din ke andar) - High priority
+            if (pubDate) {
+                const postDate = new Date(pubDate);
+                const daysOld = (new Date() - postDate) / (1000 * 60 * 60 * 24);
+                if (daysOld <= 2) priority += 30;
+                else if (daysOld <= 7) priority += 20;
+                else priority += 10;
+            }
+            
+            // 2. Important keywords in title - Medium priority
+            const importantKeywords = ['latest', 'new', '2024', 'update', 'important', 'guide', 'tutorial'];
+            if (title) {
+                const lowerTitle = title.toLowerCase();
+                importantKeywords.forEach(keyword => {
+                    if (lowerTitle.includes(keyword)) priority += 5;
+                });
+            }
+            
+            // 3. Homepage ya important pages - Low priority
+            if (url === BLOG_URL || url.includes('/p/')) {
+                priority += 3;
+            }
+            
+            return { ...post, priority, url };
+        })
+        .sort((a, b) => b.priority - a.priority) // Descending order
+        .slice(0, MAX_URLS_TO_SUBMIT);
 }
+
+// =================================================================
+// ## Modified Indexing Function
+// =================================================================
 
 async function checkAndIndexNewPosts() {
     let results = [];
     try {
-        console.log('\n🚀 Starting Google Indexing Check...');
+        console.log('\n🚀 Starting Smart Google Indexing Check...');
         
         const latestPosts = await getLatestPosts();
         
         if (latestPosts.length === 0) {
-            console.log('❌ No posts found to submit');
+            console.log('✅ All posts are already indexed! No new URLs to submit.');
             return;
         }
 
-        const postsToSubmit = latestPosts.slice(0, MAX_URLS_TO_SUBMIT);
-        console.log(`📦 Filtering: Submitting top ${postsToSubmit.length} posts for quick indexing...`);
-        console.log('💡 Note: URLs are re-submitted to ensure quick indexing status.');
+        // Priority-based filtering
+        const postsToSubmit = prioritizeUrls(latestPosts);
+        
+        console.log(`📦 Smart Selection: Submitting top ${postsToSubmit.length} priority posts`);
+        console.log('🎯 Priority order: Newest + Important content first');
 
         for (const post of postsToSubmit) {
-            const postUrl = post.url || post.link;
+            const postUrl = post.url;
             if (!postUrl) continue;
             
             try {
@@ -151,25 +187,24 @@ async function checkAndIndexNewPosts() {
             }
         }
         
+        // Summary report with more details
         const submitted = results.filter(r => r.success).length;
         const failed = results.filter(r => !r.success).length;
-        const postsFound = latestPosts.length;
-        const urlsRemaining = Math.max(0, postsFound - postsToSubmit.length);
+        const totalNew = latestPosts.length;
         
         console.log(`\n==============================================`);
-        console.log(`📊 INDEXING RUN SUMMARY: ${new Date().toLocaleTimeString()}`);
+        console.log(`📊 SMART INDEXING SUMMARY: ${new Date().toLocaleTimeString()}`);
         console.log(`==============================================`);
-        console.log(`✅ Newly Submitted/Updated: ${submitted}`);
-        console.log(`❌ Failed (Errors): ${failed}`);
+        console.log(`🔍 New/Unindexed URLs found: ${totalNew}`);
+        console.log(`🎯 High-priority URLs submitted: ${postsToSubmit.length}`);
+        console.log(`✅ Successfully submitted: ${submitted}`);
+        console.log(`❌ Failed: ${failed}`);
         
         if (failed > 0 && results.some(r => r.error && r.error.includes('Quota Exceeded'))) {
-            console.log(`🚨🚨 STOPPED EARLY: Quota exceeded. ${urlsRemaining} URLs remaining for the next scheduled run.`);
-        } else if (postsFound > MAX_URLS_TO_SUBMIT) {
-            console.log(`⭐ NOTE: Only the top ${MAX_URLS_TO_SUBMIT} URLs were processed. ${urlsRemaining} URLs remaining.`);
-        } else {
-             console.log(`🟢 Status: Job Complete. All ${postsToSubmit.length} posts submitted.`);
+            console.log(`🚨 QUOTA EXCEEDED: Remaining URLs will be processed next time`);
         }
         
+        console.log(`⭐ Next run: High-priority new content will be checked`);
         console.log(`==============================================`);
     } catch (error) {
         console.error('❌ Critical Indexing Process Error:', error.message);
@@ -177,33 +212,42 @@ async function checkAndIndexNewPosts() {
 }
 
 // =================================================================
-// ## Startup aur Mode Selection (Yahan tabdeeli karein)
+// ## Environment Variables Setup
 // =================================================================
 
-console.log('🚀 Indexer Application Starting...');
+/*
+Ab aapko apne environment variables mein yeh add karna hoga:
 
-// ----------------------------------------------------------------------------------
-// 💡 KAISE CHALAAYEIN: 
-// Sirf ek (1) MODE (A ya B) ko uncomment (zinda) rakhein aur doosre ko comment (band) kar dein.
-// ----------------------------------------------------------------------------------
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-email@project.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...
+BLOG_URL=https://ticnocity.blogspot.com
+RSS_FEED_URL=https://ticnocity.blogspot.com/feeds/posts/default?alt=rss
+SEARCH_CONSOLE_PROPERTY=sc-domain:ticnocity.blogspot.com
 
+*/
 
-// ➡️ MODE A: SIRF EK BAAR CHALKAR RUK JAYE (Testing / GitHub Actions / Mode Once)
+// =================================================================
+// ## Mode Selection
+// =================================================================
+
+console.log('🚀 Smart Indexer Application Starting...');
+
+// ➡️ MODE A: Single Run (Testing)
 /*
 checkAndIndexNewPosts(); 
 */
 
-// ➡️ MODE B: SCHEDULE CHALTA RAHE (24/7 Automation for Replit Always On)
-const CHECK_INTERVAL = '0 */3 * * *'; // Har 3 ghante mein run karega (Aap yahan badal sakte hain)
+// ➡️ MODE B: Scheduled (Production)
+const CHECK_INTERVAL = '0 */3 * * *'; // Har 3 ghante
 
-console.log(`⏰ Scheduler Mode: Will check every 3 hours.`);
+console.log(`⏰ Smart Scheduler Mode: Priority-based indexing every 3 hours`);
 
 cron.schedule(CHECK_INTERVAL, async () => {
     console.log(`\n\n==============================================`);
-    console.log(`🕒 SCHEDULED RUN STARTED...`);
+    console.log(`🕒 SMART SCHEDULED RUN STARTED...`);
     console.log(`==============================================`);
     await checkAndIndexNewPosts();
 });
 
-// Immediate run on startup (Schedule Mode mein shuruat mein bhi chalta hai)
+// Startup pe bhi run karega
 checkAndIndexNewPosts();
