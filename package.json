@@ -4,12 +4,17 @@
   "description": "Auto Google Indexing for Blogger Posts",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "NODE_OPTIONS='--openssl-legacy-provider' node index.js",
+    "dev": "NODE_OPTIONS='--openssl-legacy-provider' nodemon index.js",
+    "test": "NODE_OPTIONS='--openssl-legacy-provider' node test.js"
   },
   "dependencies": {
     "googleapis": "^137.0.0",
     "node-cron": "^3.0.3",
     "axios": "^1.7.2",
     "rss-parser": "^3.13.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
