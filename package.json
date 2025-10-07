@@ -1,24 +1,23 @@
 {
   "name": "blogger-auto-indexer",
   "version": "1.0.0",
-  "description": "Auto Google Indexing for Blogger Posts - Works on GitHub Actions & Replit",
+  "description": "Automatically indexes new and unindexed Blogger posts using Google Indexing API.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "node test.js",
-    "github": "node index.js"
+    "start": "node index.js"
   },
   "dependencies": {
+    "axios": "^1.7.2",
     "googleapis": "^137.0.0",
     "node-cron": "^3.0.3",
-    "axios": "^1.7.2",
     "rss-parser": "^3.13.0"
   },
-  "engines": {
-    "node": ">=16.0.0"
-  },
-  "keywords": ["google-indexing", "blogger", "automation", "seo"],
+  "keywords": [
+    "blogger",
+    "google-indexing",
+    "seo",
+    "automation"
+  ],
   "author": "Your Name",
-  "license": "MIT"
-}
+  "license": "ISC"
+    }
