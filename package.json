@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "node test.js",
-    "github": "node github-actions.js"
+    "github": "node index.js"
   },
   "dependencies": {
     "googleapis": "^137.0.0",
