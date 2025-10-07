@@ -1,38 +1,43 @@
-name: Google Indexing Automation
+name: Blogger Auto Indexer
 
 on:
-  # Job ko har 24 ghante (midnight) mein chalane ka schedule
   schedule:
-    - cron: '0 0 * * *' 
-  # Manual run ke liye button
-  workflow_dispatch:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Manual trigger
+  push:
+    branches: [ main ]
 
 jobs:
-  run-indexing:
+  index-posts:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v3
       
-      # Node.js ko setup karein
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      # Dependencies (packages) install karein
-      - name: Install Dependencies
-        run: npm install
-
-      # Indexing Script ko chalaayein
-      - name: Run Indexing Script
-        run: node index.js
-        env:
-          # GitHub Secrets se Environment Variables load karein
-          GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
-          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
-          BLOG_URL: ${{ secrets.BLOG_URL }}
-          RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
-          # Abhi 24 ghante par set hai (Aap isse badal sakte hain)
-          CHECK_INTERVAL: '0 0 * * *'
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run Blogger Indexer
+      env:
+        GITHUB_ACTIONS: 'true'
+        GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
+        GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+        BLOG_URL: ${{ secrets.BLOG_URL }}
+        RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
+        MAX_URLS_PER_RUN: '10' # GitHub Actions ke liye limit
+      run: npm start
+      
+    - name: Notify on failure
+      if: failure()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          console.log('Workflow failed!');
