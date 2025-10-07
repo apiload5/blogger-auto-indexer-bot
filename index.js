@@ -2,404 +2,284 @@ const { google } = require('googleapis');
 const axios = require('axios');
 const cron = require('node-cron');
 const Parser = require('rss-parser');
-const { URL } = require('url');
-const https = require('https');
-const tls = require('tls');
 
-// =================================================================
-// ## COMPREHENSIVE SSL FIX FOR ALL PLATFORMS
-// =================================================================
+// 🔑 FIX: OpenSSL 3.0 error ko hal karne ke liye - HTTPS connection fix.
+require('https').globalAgent.options.ciphers = 'DEFAULT@SECLEVEL=1'; 
 
-const IS_GITHUB_ACTIONS = process.env.GITHUB_ACTIONS === 'true';
-const IS_REPLIT = process.env.REPLIT_DB_URL !== undefined;
-
-console.log('🏁 Platform Detection:');
-console.log(`📍 GitHub Actions: ${IS_GITHUB_ACTIONS}`);
-console.log(`📍 Replit: ${IS_REPLIT}`);
-console.log(`🔧 Node Version: ${process.version}`);
-console.log(`🔧 OpenSSL Version: ${process.versions.openssl}`);
-
-// SSL FIX: Multiple approaches
-// Approach 1: Environment variables
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.env.OPENSSL_CONF = '/dev/null';
-
-// Approach 2: Custom HTTPS Agent
-const httpsAgent = new https.Agent({
-  secureOptions: tls.constants.SSL_OP_LEGACY_SERVER_CONNECT,
-  ciphers: [
-    'TLS_CHACHA20_POLY1305_SHA256',
-    'TLS_AES_128_GCM_SHA256',
-    'TLS_AES_256_GCM_SHA384',
-    'TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256',
-    'TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384',
-    'TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256',
-    'ECDHE-RSA-AES128-GCM-SHA256',
-    'ECDHE-RSA-AES256-GCM-SHA384',
-    'DHE-RSA-AES128-GCM-SHA256',
-    'DHE-RSA-AES256-GCM-SHA384',
-    'AES128-GCM-SHA256',
-    'AES256-GCM-SHA384',
-    'AES128-SHA256',
-    'AES256-SHA256',
-    'AES128-SHA',
-    'AES256-SHA'
-  ].join(':'),
-  minVersion: 'TLSv1',
-  maxVersion: 'TLSv1.3'
-});
-
-// Approach 3: Global agent modification
-https.globalAgent.options.secureOptions = tls.constants.SSL_OP_LEGACY_SERVER_CONNECT;
-https.globalAgent.options.ciphers = 'DEFAULT@SECLEVEL=1';
-
-// Environment variables
+// Environment variables - From GitHub Secrets
 const {
-  GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  GOOGLE_PRIVATE_KEY,
-  BLOG_URL,
-  RSS_FEED_URL,
-  ENABLE_SCHEDULER = 'true',
-  MAX_URLS_PER_RUN = '25',
-  RUN_IMMEDIATELY = 'true'
+    GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    GOOGLE_PRIVATE_KEY,
+    BLOG_URL, // REQUIRED
+    RSS_FEED_URL, // OPTIONAL
+    CHECK_INTERVAL = '0 */6 * * *', // Default 3 hours
+    
+    // 🔑 NEW: Search Console se nikaale gaye URLs (Commas/Newlines se separated)
+    PRIORITY_INDEX_URLS 
 } = process.env;
 
-// Constants
-const MAX_URLS_TO_SUBMIT = parseInt(MAX_URLS_PER_RUN) || 25;
-const DELAY_BETWEEN_REQUESTS = 2000;
-const ENABLE_CRON = ENABLE_SCHEDULER === 'true';
-const SHOULD_RUN_NOW = RUN_IMMEDIATELY === 'true';
+// RSS Parser initialize
+const parser = new Parser();
 
-// =================================================================
-// ## INITIALIZE SERVICES WITH SSL FIX
-// =================================================================
-
-// Axios instance with SSL fix
-const axiosInstance = axios.create({
-  httpsAgent: httpsAgent,
-  timeout: 30000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br'
-  }
-});
-
-// RSS Parser
-const parser = new Parser({
-  timeout: 15000,
-  customFields: {
-    item: ['pubDate', 'link', 'title', 'content', 'guid']
-  },
-  requestOptions: {
-    agent: httpsAgent,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-  }
-});
-
-// Google Auth with SSL fix
-console.log('🔧 Initializing Google Auth...');
-const indexingAuth = new google.auth.JWT(
-  GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  null,
-  GOOGLE_PRIVATE_KEY ? GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n') : '',
-  ['https://www.googleapis.com/auth/indexing'],
-  null
-);
-
-// Apply SSL fix to auth
-indexingAuth.agent = httpsAgent;
-
+// Google Indexing API setup
 const indexing = google.indexing('v3');
 
-// =================================================================
-// ## POST FETCHING FUNCTIONS
-// =================================================================
+// JWT Client for Indexing API
+const indexingAuth = new google.auth.JWT(
+    GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    null,
+    GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    ['https://www.googleapis.com/auth/indexing'],
+    null
+);
 
-async function getPostsFromHTML() {
-  try {
-    console.log('🌐 Checking blog via HTML...');
-    const response = await axiosInstance.get(BLOG_URL);
-    const html = response.data;
-    
-    const postUrlPatterns = [
-      /href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g,
-      /href="([^"]*\/p\/[^"]*\.html)"/g,
-      /<a[^>]*href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*)"[^>]*>/g,
-      /href="(https:\/\/[^"]*\.blogspot\.com\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g
-    ];
-    
-    const posts = [];
-    const seenUrls = new Set();
-    const blogBase = new URL(BLOG_URL).origin;
+// Track already indexed URLs during the current session
+let indexedUrls = new Set();
 
-    for (const pattern of postUrlPatterns) {
-      let match;
-      while ((match = pattern.exec(html)) !== null) {
-        let url = match[1];
-        if (url.startsWith('/')) { 
-          url = blogBase + url; 
-        }
-        if (!seenUrls.has(url) && url.includes('http') && url.includes('.html') && !url.includes('search?q=')) {
-          seenUrls.add(url);
-          posts.push({ 
-            url: url, 
-            title: `Post from ${new URL(url).pathname}`,
-            source: 'html'
-          });
-        }
-      }
-    }
-    console.log(`✅ Found ${posts.length} posts via HTML`);
-    return posts; 
-  } catch (error) {
-    console.error('❌ HTML scraping error:', error.message);
-    return [];
-  }
+/**
+ * Utility function to wait (Rate Limiting).
+ */
+async function wait(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function getLatestPosts() {
-  try {
-    console.log('📝 Checking for new posts...');
-    let rssUrl = RSS_FEED_URL || `${BLOG_URL.replace(/\/$/, '')}/feeds/posts/default?alt=rss`;
-    console.log(`📡 Using RSS feed: ${rssUrl}`);
-    
-    const feed = await parser.parseURL(rssUrl);
-    const posts = (feed.items || []).map(item => ({
-      ...item,
-      source: 'rss'
-    }));
-    
-    console.log(`✅ Found ${posts.length} posts via RSS`);
-    return posts;
-  } catch (error) {
-    console.error('❌ RSS Error:', error.message);
-    console.log('🔄 Falling back to HTML scraping...');
-    return await getPostsFromHTML();
-  }
-}
+/**
+ * Google Indexing API ke zariye URL ko index karta hai.
+ */
+async function indexUrl(url) {
+    try {
+        if (!url || !url.startsWith('http')) return { success: false, url: url, error: 'Invalid URL' };
+        
+        // Agar already indexed hai to skip karo
+        if (indexedUrls.has(url)) {
+            // console.log(`⏭️ Already processed: ${url}`);
+            return { success: true, skipped: true, url: url };
+        }
 
-// =================================================================
-// ## ENHANCED INDEXING FUNCTION WITH SSL RETRY
-// =================================================================
-
-async function indexUrl(url, attempt = 1) {
-  try {
-    console.log(`🔍 [Attempt ${attempt}] Submitting URL: ${url}`);
-    
-    const response = await indexing.urlNotifications.publish({
-      auth: indexingAuth,
-      requestBody: { 
-        url: url, 
-        type: 'URL_UPDATED' 
-      }
-    });
-
-    console.log(`✅ Successfully submitted: ${url}`);
-    return { success: true, url: url, response: response.data };
-  } catch (error) {
-    const errorMessage = error.response?.data?.error?.message || error.message;
-    
-    // SSL Error handling with retry
-    if (errorMessage.includes('1E08010C') || errorMessage.includes('unsupported') || errorMessage.includes('DECODER')) {
-      console.log(`🔒 SSL Error detected, using alternative method...`);
-      
-      if (attempt <= 3) {
-        console.log(`🔄 Retrying with different SSL configuration (${attempt}/3)...`);
+        console.log(`🔍 Sending request for: ${url}`);
         
-        // Different SSL approach for retry
-        const retryAgent = new https.Agent({
-          secureOptions: tls.constants.SSL_OP_LEGACY_SERVER_CONNECT,
-          ciphers: 'DEFAULT@SECLEVEL=0',
-          minVersion: 'TLSv1'
-        });
-        
-        // Create new auth instance for retry
-        const retryAuth = new google.auth.JWT(
-          GOOGLE_SERVICE_ACCOUNT_EMAIL,
-          null,
-          GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-          ['https://www.googleapis.com/auth/indexing'],
-          null
-        );
-        
-        retryAuth.agent = retryAgent;
-        
-        try {
-          const retryResponse = await indexing.urlNotifications.publish({
-            auth: retryAuth,
-            requestBody: { 
-              url: url, 
-              type: 'URL_UPDATED' 
+        const response = await indexing.urlNotifications.publish({
+            auth: indexingAuth,
+            requestBody: {
+                url: url,
+                type: 'URL_UPDATED' // Ya 'URL_DELETED' agar aap delete kar rahe hon
             }
-          });
-          
-          console.log(`✅ Successfully submitted (retry ${attempt}): ${url}`);
-          return { success: true, url: url, response: retryResponse.data };
-        } catch (retryError) {
-          return await indexUrl(url, attempt + 1);
-        }
-      }
-    }
-    
-    if (errorMessage.includes('Quota exceeded')) {
-      console.error('🚨 QUOTA EXCEEDED. Stopping job.');
-      throw new Error('Quota Exceeded'); 
-    }
-    
-    if (errorMessage.includes('already')) {
-      console.log(`ℹ️ URL already submitted: ${url}`);
-      return { success: true, url: url, note: 'Already submitted' };
-    }
-    
-    console.error(`❌ Error submitting URL: ${url}`, errorMessage);
-    return { success: false, url: url, error: errorMessage };
-  }
-}
-
-// =================================================================
-// ## MAIN INDEXING LOGIC
-// =================================================================
-
-async function checkAndIndexNewPosts() {
-  let results = [];
-  try {
-    console.log('\n🚀 Starting Google Indexing Check...');
-    console.log(`📍 Platform: ${IS_REPLIT ? 'Replit' : IS_GITHUB_ACTIONS ? 'GitHub Actions' : 'Unknown'}`);
-    console.log(`🔧 SSL Fix: Applied with multiple fallbacks`);
-    
-    const latestPosts = await getLatestPosts();
-    
-    if (latestPosts.length === 0) {
-      console.log('❌ No posts found to submit');
-      return { success: false, message: 'No posts found' };
-    }
-
-    const postsToSubmit = latestPosts.slice(0, MAX_URLS_TO_SUBMIT);
-    console.log(`📦 Processing ${postsToSubmit.length} posts (Limit: ${MAX_URLS_TO_SUBMIT})`);
-
-    for (const [index, post] of postsToSubmit.entries()) {
-      const postUrl = post.url || post.link;
-      if (!postUrl) continue;
-      
-      try {
-        console.log(`\n📄 [${index + 1}/${postsToSubmit.length}] Processing: ${postUrl}`);
-        const result = await indexUrl(postUrl);
-        results.push(result);
-
-        // Rate limiting
-        if (index < postsToSubmit.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_REQUESTS));
-        }
-      } catch (error) {
-        if (error.message.includes('Quota Exceeded')) {
-          results.push({ success: false, url: postUrl, error: 'Quota Exceeded' });
-          break; 
-        }
-        results.push({ success: false, url: postUrl, error: error.message });
-      }
-    }
-    
-    // Generate summary
-    const submitted = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
-    const totalFound = latestPosts.length;
-    
-    console.log(`\n==============================================`);
-    console.log(`📊 INDEXING SUMMARY - ${new Date().toLocaleString()}`);
-    console.log(`==============================================`);
-    console.log(`📍 Platform: ${IS_REPLIT ? 'Replit' : 'GitHub Actions'}`);
-    console.log(`📄 Total posts found: ${totalFound}`);
-    console.log(`🔄 Posts processed: ${postsToSubmit.length}`);
-    console.log(`✅ Successfully submitted: ${submitted}`);
-    console.log(`❌ Failed: ${failed}`);
-    
-    if (failed > 0) {
-      const sslErrors = results.filter(r => r.error && r.error.includes('1E08010C')).length;
-      if (sslErrors > 0) {
-        console.log(`🔒 SSL Errors: ${sslErrors} - Consider using Node.js 16`);
-      }
-    }
-    
-    console.log(`⏰ Next run: ${ENABLE_CRON ? 'Scheduled' : 'Manual'}`);
-    console.log(`==============================================`);
-    
-    // GitHub Actions ke liye success bhejein even if some failed
-    const overallSuccess = submitted > 0 || totalFound === 0;
-    return {
-      success: overallSuccess,
-      submitted,
-      failed, 
-      totalFound,
-      platform: IS_REPLIT ? 'replit' : 'github'
-    };
-  } catch (error) {
-    console.error('❌ Critical Indexing Process Error:', error.message);
-    return { success: false, error: error.message };
-  }
-}
-
-// =================================================================
-// ## APPLICATION STARTUP
-// =================================================================
-
-async function initializeApp() {
-  console.log('🚀 Blogger Auto Indexer Starting...');
-  console.log('🔧 Enhanced SSL Fix Version');
-  
-  // Validate environment
-  if (!GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY || !BLOG_URL) {
-    console.error('❌ Missing required environment variables');
-    console.log('💡 Required: GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY, BLOG_URL');
-    process.exit(1);
-  }
-
-  try {
-    // Platform-specific execution
-    if (IS_GITHUB_ACTIONS) {
-      console.log('🔧 GitHub Actions Mode - Single Run');
-      const result = await checkAndIndexNewPosts();
-      
-      // GitHub Actions mein exit code set karein
-      if (result.success) {
-        console.log('✅ Workflow completed successfully');
-        process.exit(0);
-      } else {
-        console.log('⚠️ Workflow completed with warnings');
-        process.exit(0); // Still exit with 0 to avoid workflow failure
-      }
-    } 
-    else if (IS_REPLIT) {
-      console.log('🔧 Replit Mode - Scheduled + Immediate Run');
-      
-      if (ENABLE_CRON) {
-        const CHECK_INTERVAL = '0 */3 * * *';
-        console.log(`⏰ Scheduled mode: Running every 3 hours`);
-        
-        cron.schedule(CHECK_INTERVAL, async () => {
-          console.log(`\n\n🕒 SCHEDULED RUN: ${new Date().toLocaleString()}`);
-          await checkAndIndexNewPosts();
         });
-      }
-      
-      if (SHOULD_RUN_NOW) {
-        await checkAndIndexNewPosts();
-      }
-    } 
-    else {
-      console.log('🔧 Local/Unknown Environment - Single Run');
-      await checkAndIndexNewPosts();
+
+        console.log(`✅ Success (Type: ${response.data.urlNotificationMetadata.type}): ${url}`);
+        
+        // Track kar lo processed URLs
+        indexedUrls.add(url);
+        
+        return { 
+            success: true, 
+            url: url, 
+            response: response.data 
+        };
+    } catch (error) {
+        // Google Indexing API error yahan catch hoga
+        const errorMessage = error.response?.data?.error?.message || error.message;
+        console.error(`❌ Error indexing URL: ${url}`, errorMessage);
+        return { 
+            success: false, 
+            url: url, 
+            error: errorMessage 
+        };
     }
-  } catch (error) {
-    console.error('💥 Fatal Application Error:', error);
-    process.exit(1);
-  }
 }
 
-// Start the application
-initializeApp().catch(error => {
-  console.error('💥 Unhandled Application Error:', error);
-  process.exit(1);
+/**
+ * 🔑 NEW: Priority Indexing (Search Console se nikaale gaye URLs)
+ * Sab se pehle un URLs ko index karta hai jo index nahi hue.
+ */
+async function priorityIndex() {
+    if (!PRIORITY_INDEX_URLS) {
+        return { count: 0, results: [] };
+    }
+    
+    console.log('\n🌟 Starting Priority Indexing for unindexed URLs...');
+    
+    // URLs ko comma ya newline se alag karen aur saaf karen
+    const urlsToForceIndex = PRIORITY_INDEX_URLS
+        .split(/[,\n]/)
+        .map(url => url.trim())
+        .filter(url => url.length > 0 && url.startsWith('http')); // Ensure only valid http URLs
+        
+    let results = [];
+    
+    for (const url of urlsToForceIndex) {
+        const result = await indexUrl(url); 
+        results.push(result);
+        await wait(2000); // 2 second wait (Rate limiting)
+    }
+    
+    const successfulCount = results.filter(r => r.success && !r.skipped).length;
+    console.log(`✅ Priority Indexing done. Indexed ${successfulCount} URLs.`);
+    return { count: successfulCount, results: results };
+}
+
+
+/**
+ * RSS feed se latest posts nikalta hai.
+ */
+async function getLatestPosts() {
+    try {
+        console.log('\n📝 Checking for new posts via RSS...');
+        
+        let rssUrl;
+        
+        if (RSS_FEED_URL) {
+            rssUrl = RSS_FEED_URL;
+        } else {
+            // Automatically generate RSS URL
+            rssUrl = `${BLOG_URL.replace(/\/$/, '')}/feeds/posts/default?alt=rss`;
+        }
+        console.log(`📡 Using RSS feed: ${rssUrl}`);
+        
+        const feed = await parser.parseURL(rssUrl);
+        const posts = feed.items || [];
+        
+        console.log(`✅ Found ${posts.length} posts via RSS`);
+        return posts;
+        
+    } catch (error) {
+        console.error('❌ RSS Error:', error.message);
+        console.log('🔄 Falling back to HTML scraping...');
+        return await getPostsFromHTML();
+    }
+}
+
+/**
+ * HTML scraping fallback (Agar RSS kaam na kare).
+ */
+async function getPostsFromHTML() {
+    try {
+        console.log('🌐 Checking blog via HTML...');
+        
+        const response = await axios.get(BLOG_URL, {
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+
+        const html = response.data;
+        
+        const postUrlPatterns = [
+            /href="([^"]*\/[0-9]{4}\/[0-9]{2}\/[^"]*\.html)"/g,
+            /href="([^"]*\/p\/[^"]*\.html)"/g,
+        ];
+
+        const posts = [];
+        const seenUrls = new Set();
+        const blogBase = new URL(BLOG_URL).origin;
+
+        for (const pattern of postUrlPatterns) {
+            let match;
+            while ((match = pattern.exec(html)) !== null) {
+                let url = match[1];
+                
+                // Relative URL ko absolute mein convert karo
+                if (url.startsWith('/')) {
+                    url = blogBase + url;
+                }
+                
+                // Duplicate check karo aur valid URL filter karo
+                if (!seenUrls.has(url) && 
+                    url.includes('.html') &&
+                    !url.includes('search?q=')) {
+                    seenUrls.add(url);
+                    posts.push({ url: url });
+                }
+            }
+        }
+
+        console.log(`✅ Found ${posts.length} posts via HTML`);
+        return posts.slice(0, 15); // Last 15 posts
+    } catch (error) {
+        console.error('❌ HTML scraping error:', error.message);
+        return [];
+    }
+}
+
+/**
+ * Main function to check and index posts.
+ */
+async function checkAndIndexNewPosts() {
+    try {
+        console.log('\n=============================================');
+        console.log('🚀 Starting Blogger Auto Indexer Run');
+        console.log(`⏰ Time: ${new Date().toISOString()}`);
+        console.log(`🔗 Blog URL: ${BLOG_URL}`);
+        console.log('=============================================');
+        
+        let totalIndexed = 0;
+        let totalSkipped = 0;
+        let totalFailed = 0;
+
+        // 1. Sab se pehle Priority Indexing chalao
+        const priorityResults = await priorityIndex();
+        totalIndexed += priorityResults.count;
+        totalSkipped += priorityResults.results.filter(r => r.skipped).length;
+        totalFailed += priorityResults.results.filter(r => !r.success).length;
+
+
+        // 2. Latest posts get karo
+        const latestPosts = await getLatestPosts();
+        
+        if (latestPosts.length === 0) {
+            console.log('❌ No new posts found to index.');
+        }
+
+        const latestPostResults = [];
+        
+        // Har post ko index karo
+        for (const post of latestPosts) {
+            const postUrl = post.url || post.link;
+            
+            if (!postUrl) continue;
+            
+            const result = await indexUrl(postUrl);
+            latestPostResults.push(result);
+            
+            await wait(2000); // 2 second wait between requests
+        }
+
+        // 3. Results summary
+        const newlyIndexed = latestPostResults.filter(r => r.success && !r.skipped).length;
+        const latestSkipped = latestPostResults.filter(r => r.skipped).length;
+        const latestFailed = latestPostResults.filter(r => !r.success).length;
+
+        totalIndexed += newlyIndexed;
+        totalSkipped += latestSkipped;
+        totalFailed += latestFailed;
+        
+        console.log(`\n📊 FINAL Indexing Summary:`);
+        console.log(`✅ Newly Indexed (Total): ${totalIndexed}`);
+        console.log(`⏭️ Already Indexed (Skipped): ${totalSkipped}`);
+        console.log(`❌ Failed: ${totalFailed}`);
+        console.log(`📝 Total URLs Checked: ${latestPostResults.length + priorityResults.results.length}`);
+        console.log('=============================================\n');
+        
+    } catch (error) {
+        console.error('❌ Indexing process FAILED:', error);
+        throw error;
+    }
+}
+
+// Cron job schedule
+cron.schedule(CHECK_INTERVAL, async () => {
+    console.log(`\n🕒 Scheduled check started at: ${new Date().toISOString()}`);
+    await checkAndIndexNewPosts();
 });
+
+// Startup message and first run
+const intervalParts = CHECK_INTERVAL.split(' ');
+const hours = intervalParts.length > 1 && intervalParts[1].startsWith('*/') ? intervalParts[1].replace('*/', '') : '3';
+console.log('🚀 Blogger Auto Indexer Started!');
+console.log(`⏰ Will check every ${hours} hours for new posts`);
+
+// First run on startup
+setTimeout(() => {
+    checkAndIndexNewPosts();
+}, 5000);
