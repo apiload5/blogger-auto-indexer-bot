@@ -2,9 +2,8 @@ name: Blogger Auto Indexer
 
 on:
   schedule:
-    # Run every 6 hours
     - cron: '0 */6 * * *'
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
   push:
     branches: [ main ]
 
@@ -20,24 +19,14 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: '18'
-        cache: 'npm'
-        
-    - name: Install dependencies
-      run: npm ci
       
-    - name: Run Blogger Indexer
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Run Indexer
       env:
-        GITHUB_ACTIONS: 'true'
         GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
         GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
         BLOG_URL: ${{ secrets.BLOG_URL }}
         RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
-        MAX_URLS_PER_RUN: '10' # GitHub Actions ke liye limit
-      run: npm start
-      
-    - name: Notify on failure
-      if: failure()
-      uses: actions/github-script@v6
-      with:
-        script: |
-          console.log('Workflow failed!');
+      run: node index.js
