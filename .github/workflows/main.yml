@@ -2,7 +2,7 @@ name: Blogger Indexer & Lockfile Management
 
 on:
   schedule:
-    # Indexing Bot har 3 ghante mein chalega
+    # Indexing Bot har 6 ghante mein chalega
     - cron: '0 */6 * * *' 
   workflow_dispatch: # Manual run ke liye
   push:
