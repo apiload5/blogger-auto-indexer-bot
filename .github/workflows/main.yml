@@ -2,7 +2,7 @@ name: Blogger Auto Indexer
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *'  # Every 6 hours
   workflow_dispatch:
   push:
     branches: [ main ]
@@ -18,15 +18,23 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '18'  # Try 16 if 18 doesn't work
+        cache: 'npm'
       
     - name: Install dependencies
       run: npm install
       
-    - name: Run Indexer
+    - name: Run Indexer with SSL Fix
       env:
+        GITHUB_ACTIONS: 'true'
         GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_EMAIL }}
         GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
         BLOG_URL: ${{ secrets.BLOG_URL }}
         RSS_FEED_URL: ${{ secrets.RSS_FEED_URL }}
+        MAX_URLS_PER_RUN: '10'
+        NODE_TLS_REJECT_UNAUTHORIZED: '0'
       run: node index.js
+      
+    - name: Success Notification
+      if: success()
+      run: echo "✅ Indexing completed successfully!"
