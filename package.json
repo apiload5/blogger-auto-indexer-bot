@@ -1,12 +1,13 @@
 {
   "name": "blogger-auto-indexer",
   "version": "1.0.0",
-  "description": "Auto Google Indexing for Blogger Posts",
+  "description": "Auto Google Indexing for Blogger Posts - Works on GitHub Actions & Replit",
   "main": "index.js",
   "scripts": {
-    "start": "NODE_OPTIONS='--openssl-legacy-provider' node index.js",
-    "dev": "NODE_OPTIONS='--openssl-legacy-provider' nodemon index.js",
-    "test": "NODE_OPTIONS='--openssl-legacy-provider' node test.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "node test.js",
+    "github": "node github-actions.js"
   },
   "dependencies": {
     "googleapis": "^137.0.0",
@@ -16,5 +17,8 @@
   },
   "engines": {
     "node": ">=16.0.0"
-  }
+  },
+  "keywords": ["google-indexing", "blogger", "automation", "seo"],
+  "author": "Your Name",
+  "license": "MIT"
 }
